@@ -1,9 +1,12 @@
+### written by yuandrk
+### yurii.andriuk@gmail.com
+
 version: "3"
 services:
 
   # sbot you can find latest version on https://github.com/yuandrk/sbot
   sbot:
-    image: denvasyliev/kbot:v1.0.0-otel
+    image: ghcr.io/yuandrk/sbot:v1.0.1-a93af65-linux-arm64
     environment:
       - METRICS_HOST=collector:4317
       - TELE_TOKEN=${TELE_TOKEN}
@@ -17,17 +20,25 @@ services:
     ports:
       - 4317:4317
 
-  # Prom
+  # Prometheus
   prometheus:
     image: prom/prometheus:latest
     command:
       - --config.file=/etc/prometheus.yaml
       - --web.enable-remote-write-receiver
       - --enable-feature=exemplar-storage
+    networks:
+      - internal
     volumes:
       - ./prometheus/prometheus.yaml:/etc/prometheus.yaml
     ports:
       - "9090:9090"
+    depends_on:
+      - cadvisor
+      - node-exporter
+    links:
+      - cadvisor:cadvisor
+      - node-exporter:node-exporter
   
   # FluentBit
   fluentbit:
@@ -64,4 +75,59 @@ services:
       - GF_FEATURE_TOGGLES_ENABLE=traceqlEditor
       - GF_SERVER_HTTP_PORT=3002
     ports:
+      - "3002:3002"
+
+
+# Prometheus exporter for hardware and OS metrics 
+# exposed by *NIX kernels, written in Go with pluggable metric collectors.
+  node-exporter:
+    container_name: monitoring-node-exporter
+    image: prom/node-exporter:latest
+    hostname: rpi-exporter
+    restart: unless-stopped
+    networks:
+      - internal
+    expose:
+      - 9100
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/host
+      - --collector.filesystem.ignored-mount-points
+      - ^/(sys|proc|dev|host|etc|rootfs/var/lib/docker/containers|rootfs/var/lib/docker/overlay2|rootfs/run/docker/netns|rootfs/var/lib/docker/aufs)($$|/)
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+      - /:/host:ro,rslave
+
+# cAdvisor (short for container Advisor) analyzes 
+# and exposes resource usage and performance data from running containers.
+
+  cadvisor:
+    container_name: monitoring-cadvisor
+    image: gcr.io/cadvisor/cadvisor:v0.47.1
+    hostname: rpi-cadvisor
+    restart: unless-stopped
+    privileged: true
+    networks:
+      - internal
+    expose:
+      - 8080
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+      - /etc/machine-id:/etc/machine-id:ro
+
+
+
+networks:
+  internal:
+    external: true
+    driver: bridge
       - "3002:3002"
